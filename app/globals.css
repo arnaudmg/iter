@@ -3,6 +3,7 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --accent: #562CFF;
 }
 
 @theme inline {
@@ -12,15 +13,45 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+body {
+  background: #ffffff;
+  color: #171717;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Styles pour les colonnes fixes de react-data-grid */
+/* Colonnes gelées avec z-index élevé pour masquer le contenu qui défile */
+.rdg-cell-frozen-custom {
+  z-index: 10 !important;
+  background-color: white !important;
+  position: sticky !important;
+}
+
+.rdg-header-cell-frozen-custom {
+  z-index: 11 !important;
+  background-color: #f9fafb !important;
+  position: sticky !important;
+}
+
+/* Cibler aussi toutes les cellules gelées génériques */
+.rdg-cell[style*="sticky"] {
+  z-index: 10 !important;
+  background-color: white !important;
+}
+
+.rdg-header-row .rdg-cell[style*="sticky"] {
+  z-index: 11 !important;
+  background-color: #f9fafb !important;
+}
+
+/* Auto-height for react-data-grid */
+.rdg-auto-height.rdg {
+  height: unset !important;
+}
+
+.rdg-auto-height .rdg-viewport {
+  height: unset !important;
+  overflow-y: hidden !important;
 }
