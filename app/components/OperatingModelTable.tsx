@@ -229,12 +229,12 @@ export default function OperatingModelTable({
             };
   
             if (subRow.monthlyAmounts) {
-              Object.entries(subRow.monthlyAmounts).forEach(([month, amount]) => {
+              (Object.entries(subRow.monthlyAmounts) as [string, number][]).forEach(([month, amount]) => {
                 subCategoryFlatRow[month] = amount;
               });
             }
             if (subRow.monthlyBudgets) {
-              Object.entries(subRow.monthlyBudgets).forEach(([month, budget]) => {
+              (Object.entries(subRow.monthlyBudgets) as [string, number][]).forEach(([month, budget]) => {
                 subCategoryFlatRow[`${month}_budget`] = budget;
               });
             }
@@ -257,14 +257,14 @@ export default function OperatingModelTable({
                 };
   
                 if (conceptRow.monthlyAmounts) {
-                  Object.entries(conceptRow.monthlyAmounts).forEach(
+                  (Object.entries(conceptRow.monthlyAmounts) as [string, number][]).forEach(
                     ([month, amount]) => {
                       conceptFlatRow[month] = amount;
                     }
                   );
                 }
                 if (conceptRow.monthlyBudgets) {
-                    Object.entries(conceptRow.monthlyBudgets).forEach(
+                    (Object.entries(conceptRow.monthlyBudgets) as [string, number][]).forEach(
                         ([month, budget]) => {
                             conceptFlatRow[`${month}_budget`] = budget;
                         }
@@ -284,14 +284,14 @@ export default function OperatingModelTable({
                     };
                     // Ajouter les montants mensuels pour la ligne de détail de compte
                     if (account.monthlyAmounts) {
-                      Object.entries(account.monthlyAmounts).forEach(
+                      (Object.entries(account.monthlyAmounts) as [string, number][]).forEach(
                         ([month, amount]) => {
                           accountDetailRow[month] = amount;
                         }
                       );
                     }
                     if (account.monthlyBudgets) {
-                      Object.entries(account.monthlyBudgets).forEach(
+                      (Object.entries(account.monthlyBudgets) as [string, number][]).forEach(
                         ([month, budget]) => {
                           accountDetailRow[`${month}_budget`] = budget;
                         }

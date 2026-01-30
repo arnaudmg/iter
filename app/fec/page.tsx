@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { ToastContainer, toast } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 import Papa from "papaparse";
 import { FECEntry, OperatingModelRow } from "../lib/types";
 import {
@@ -17,6 +19,11 @@ import MapAccountModal from "../components/MapAccountModal";
 import AccountsSpreadsheetModal from "../components/AccountsSpreadsheetModal";
 
 type View = "p&l" | "balance-sheet";
+
+interface ToastItem {
+  id: string;
+  content: (close: () => void) => React.ReactNode;
+}
 
 export default function FECPage() {
   const [fecData, setFecData] = useState<FECEntry[]>([]);
@@ -73,11 +80,74 @@ export default function FECPage() {
     >
   >(new Map());
   const [view, setView] = useState<View>("p&l");
+  const [toastShown, setToastShown] = useState(false);
+
+  // Toast Queue Management
+  const [toastQueue, setToastQueue] = useState<ToastItem[]>([]);
+  const [isToastActive, setIsToastActive] = useState(false);
+  const activeToastIdRef = useRef<string | number | null>(null);
+
+  const recurrentMock = {
+    date: "15/03/2024",
+    label: "Loyer bureaux",
+    amount: 12400,
+    periodicity: "mensuelle",
+  };
+
+  const yoyBadges = [
+    { label: "Charges fixes +8 % vs N-1", tone: "bg-amber-100 text-amber-800" },
+    { label: "Revenus -5 % vs N-1", tone: "bg-rose-100 text-rose-800" },
+    {
+      label: "Cash-out mensuel +6 % vs moyenne 6m",
+      tone: "bg-yellow-100 text-yellow-800",
+    },
+  ];
+
+  const provisionReminders = [
+    { label: "TVA", date: "15/04", amount: "18 000 €" },
+    { label: "URSSAF", date: "30/04", amount: "12 000 €" },
+    { label: "Loyers", date: "05/04", amount: "12 400 €" },
+  ];
+
+  const opportunityMock = {
+    title: "Encaissement exceptionnel N-1 détecté",
+    detail: "Prime client 45 k€ — l’intégrer en forecast ?",
+  };
+
+  const forecastVsRealized = [
+    "P&L actuel vs hypothèses : +6 % charges",
+    "P&L actuel vs hypothèses : -3 % revenus",
+  ];
+
+  const riskItems = [
+    {
+      label: "Prestataire IT - +32 % vs moyenne 6m",
+      badge: "récurrent estimé",
+      tone: "bg-amber-100 text-amber-800",
+    },
+    {
+      label: "Nouveau fournisseur marketing - 18 k€",
+      badge: "exceptionnel ?",
+      tone: "bg-rose-100 text-rose-800",
+    },
+    {
+      label: "Loyer indexé - +5 % ce mois",
+      badge: "récurrent estimé",
+      tone: "bg-green-100 text-green-800",
+    },
+  ];
 
   const handleFileProcessed = (data: FECEntry[]) => {
     setIsProcessing(true);
     setError(null);
     setFecData(data);
+    setToastShown(false);
+    setToastQueue([]); // Reset queue
+    setIsToastActive(false);
+    if (activeToastIdRef.current) {
+      toast.dismiss(activeToastIdRef.current);
+      activeToastIdRef.current = null;
+    }
 
     try {
       // Valider les écritures comptables
@@ -381,6 +451,53 @@ export default function FECPage() {
     });
   }, [fecData, customMappings]);
 
+  const mappingHealth = useMemo(() => {
+    const total = getAllAccountsWithCustomMappings.length;
+    const mapped = getAllAccountsWithCustomMappings.filter(
+      (a) => (a as any).isMapped
+    ).length;
+    const mappedPct = total > 0 ? Math.round((mapped / total) * 100) : 0;
+    const unbalancedCount = validationResult?.unbalancedEcritures?.length ?? 0;
+    const netDelta = globalBalance?.netBalance ?? 0;
+    return { mappedPct, unbalancedCount, netDelta, total, mapped };
+  }, [
+    getAllAccountsWithCustomMappings,
+    validationResult?.unbalancedEcritures,
+    globalBalance?.netBalance,
+  ]);
+
+  const addProvisionConfirmation = () => {
+    const confirmationItem: ToastItem = {
+      id: "provision-confirmation",
+      content: (close) => (
+        <div className="w-full">
+          <p className="text-sm font-semibold text-purple-900">
+            Provision ajoutée pour avril (12 400 €)
+          </p>
+          <p className="text-xs text-gray-600">
+            Ligne projetée dans le forecast (mock).
+          </p>
+          <div className="mt-3 flex justify-end">
+            <button
+              onClick={close}
+              className="rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-xs font-semibold text-purple-900 hover:bg-purple-50"
+            >
+              Voir dans tableau
+            </button>
+          </div>
+        </div>
+      ),
+    };
+
+    // Add confirmation as the NEXT item in the queue (index 1)
+    // When current toast closes (index 0), this will become index 0
+    setToastQueue((prev) => {
+      if (prev.length === 0) return [confirmationItem];
+      // Insert after current
+      return [prev[0], confirmationItem, ...prev.slice(1)];
+    });
+  };
+
   const handleReset = () => {
     setFecData([]);
     setOperatingModel([]);
@@ -396,7 +513,316 @@ export default function FECPage() {
       category: "Category / Subcategory",
       amount: "Amount (€)",
     });
+    setToastShown(false);
+    toast.dismiss();
+    setToastQueue([]);
+    setIsToastActive(false);
+    if (activeToastIdRef.current) {
+      toast.dismiss(activeToastIdRef.current);
+      activeToastIdRef.current = null;
+    }
   };
+
+  // Populate Toast Queue once
+  useEffect(() => {
+    if (toastShown || fecData.length === 0) return;
+
+    const newQueue: ToastItem[] = [
+      {
+        id: "recurrent",
+        content: (close) => (
+          <div className="w-full">
+            <p className="text-sm font-semibold text-purple-900">
+              Dépense récurrente détectée
+            </p>
+            <p className="mt-1 text-sm text-gray-800">
+              {recurrentMock.date} — {recurrentMock.label} —{" "}
+              {new Intl.NumberFormat("fr-FR", {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0,
+              }).format(recurrentMock.amount)}{" "}
+              € — périodicité estimée : {recurrentMock.periodicity}
+            </p>
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  addProvisionConfirmation();
+                  close();
+                }}
+                className="rounded-lg bg-[#562CFF] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-[#4521cc]"
+              >
+                Ajouter au forecast
+              </button>
+              <button
+                onClick={close}
+                className="rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-xs font-semibold text-purple-900 hover:bg-purple-50"
+              >
+                Ignorer ce mois-ci
+              </button>
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "opportunity",
+        content: (close) => (
+          <div className="w-full">
+            <p className="text-sm font-semibold text-green-900">
+              {opportunityMock.title}
+            </p>
+            <p className="mt-1 text-sm text-gray-800">
+              {opportunityMock.detail}
+            </p>
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                onClick={close}
+                className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-green-700"
+              >
+                Inclure
+              </button>
+              <button
+                onClick={close}
+                className="rounded-lg border border-green-200 bg-white px-3 py-1.5 text-xs font-semibold text-green-900 hover:bg-green-50"
+              >
+                Classer exceptionnel
+              </button>
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "yoy",
+        content: (close) => (
+          <div className="w-full">
+            <p className="text-sm font-semibold text-gray-900">
+              Dérive vs N-1 (mock)
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {yoyBadges.map((badge) => (
+                <span
+                  key={badge.label}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${badge.tone}`}
+                >
+                  {badge.label}
+                </span>
+              ))}
+            </div>
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={close}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-50"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "mapping",
+        content: (close) => (
+          <div className="w-full">
+            <p className="text-sm font-semibold text-gray-900">
+              Santé de mapping (mock)
+            </p>
+            <div className="mt-2 space-y-1 text-sm text-gray-800">
+              <p>
+                Comptes mappés: {mappingHealth.mapped} / {mappingHealth.total} (
+                {mappingHealth.mappedPct}%)
+              </p>
+              <p>Écritures déséquilibrées: {mappingHealth.unbalancedCount}</p>
+              <p>
+                Delta net vs équilibre global:{" "}
+                {new Intl.NumberFormat("fr-FR", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }).format(mappingHealth.netDelta)}{" "}
+                €
+              </p>
+            </div>
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                onClick={close}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-50"
+              >
+                Mapper
+              </button>
+              <button
+                onClick={close}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-50"
+              >
+                Voir détails
+              </button>
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "provisions",
+        content: (close) => (
+          <div className="w-full">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-blue-900">
+                  Échéances à provisionner (mock)
+                </p>
+                <p className="text-xs text-blue-800">
+                  Dates et montants suggérés pour anticiper les sorties
+                </p>
+              </div>
+              <button
+                onClick={close}
+                className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-900 hover:bg-blue-50"
+              >
+                Intégrer en charges à payer
+              </button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {provisionReminders.map((item) => (
+                <div
+                  key={item.label}
+                  className="flex items-center justify-between rounded-lg border border-blue-100 bg-white px-3 py-2"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">
+                      {item.label}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Échéance {item.date}
+                    </p>
+                  </div>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {item.amount}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={close}
+                className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-900 hover:bg-blue-50"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "risk",
+        content: (close) => (
+          <div className="w-full">
+            <p className="text-sm font-semibold text-gray-900">
+              Top postes à risque (mock)
+            </p>
+            <div className="mt-2 space-y-2">
+              {riskItems.map((item) => (
+                <div
+                  key={item.label}
+                  className="flex items-center justify-between rounded-lg border border-gray-100 bg-white px-3 py-2"
+                >
+                  <div className="text-sm text-gray-900">{item.label}</div>
+                  <span
+                    className={`ml-2 rounded-full px-3 py-1 text-[11px] font-semibold ${item.tone}`}
+                  >
+                    {item.badge}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={close}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-50"
+              >
+                Ouvrir détails compte
+              </button>
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "forecast",
+        content: (close) => (
+          <div className="w-full">
+            <p className="text-sm font-semibold text-gray-900">
+              Forecast vs réalisé (mock)
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {forecastVsRealized.map((chip) => (
+                <span
+                  key={chip}
+                  className="rounded-full bg-gray-100 px-3 py-1 text-[11px] font-semibold text-gray-800"
+                >
+                  {chip}
+                </span>
+              ))}
+            </div>
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={close}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-50"
+              >
+                Adapter hypothèses
+              </button>
+            </div>
+          </div>
+        ),
+      },
+    ];
+
+    setToastQueue(newQueue);
+    setToastShown(true);
+  }, [
+    fecData,
+    toastShown,
+    provisionReminders,
+    yoyBadges,
+    recurrentMock,
+    mappingHealth,
+    riskItems,
+    forecastVsRealized,
+    opportunityMock,
+  ]);
+
+  // Process Toast Queue
+  useEffect(() => {
+    if (toastQueue.length > 0 && !isToastActive) {
+      const currentItem = toastQueue[0];
+      const remainingCount = toastQueue.length;
+      setIsToastActive(true);
+
+      const id = toast(
+        ({ closeToast }) => (
+          <div className="relative w-full">
+            {/* Badge: Shows total remaining including this one */}
+            <div className="absolute -top-6 -right-5 flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-md z-50 ring-2 ring-white">
+              {remainingCount}
+            </div>
+            {currentItem.content(() => {
+              // Custom close handler passed to content
+              // closeToast() will trigger onClose which processes queue
+              closeToast?.();
+            })}
+          </div>
+        ),
+        {
+          autoClose: false,
+          closeButton: false,
+          closeOnClick: false,
+          draggable: false,
+          position: "top-right",
+          hideProgressBar: true,
+          onClose: () => {
+            setIsToastActive(false);
+            setToastQueue((prev) => prev.slice(1));
+            activeToastIdRef.current = null;
+          },
+        }
+      );
+      activeToastIdRef.current = id;
+    }
+  }, [toastQueue, isToastActive]);
 
   const totalAmount = useMemo(() => {
     return operatingModel.reduce((sum, row) => sum + row.amount, 0);
@@ -405,6 +831,14 @@ export default function FECPage() {
   return (
     <div className="min-h-screen bg-white p-8">
       <div className="max-w-7xl mx-auto">
+        <ToastContainer
+          position="top-right"
+          newestOnTop
+          closeOnClick={false}
+          draggable={false}
+          pauseOnHover={false}
+          hideProgressBar
+        />
         {/* Header */}
         <div className="mb-12">
           <h1 className="text-4xl font-light text-gray-900 tracking-tight">

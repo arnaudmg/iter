@@ -75,26 +75,26 @@ export default function FileUploader({
             : cleanRow.Credit || 0;
 
         return {
-          JournalCode: cleanRow.JournalCode || "",
-          JournalLib: cleanRow.JournalLib || "",
-          EcritureNum: cleanRow.EcritureNum || "",
-          EcritureDate: cleanRow.EcritureDate || "",
-          CompteNum: cleanRow.CompteNum || "",
-          CompteLib: cleanRow.CompteLib || "",
-          CompAuxNum: cleanRow.CompAuxNum || "",
-          CompAuxLib: cleanRow.CompAuxLib || "",
-          PieceRef: cleanRow.PieceRef || "",
-          PieceDate: cleanRow.PieceDate || "",
-          EcritureLib: cleanRow.EcritureLib || "",
+          JournalCode: String(cleanRow.JournalCode ?? ""),
+          JournalLib: String(cleanRow.JournalLib ?? ""),
+          EcritureNum: String(cleanRow.EcritureNum ?? ""),
+          EcritureDate: String(cleanRow.EcritureDate ?? ""),
+          CompteNum: String(cleanRow.CompteNum ?? ""),
+          CompteLib: String(cleanRow.CompteLib ?? ""),
+          CompAuxNum: String(cleanRow.CompAuxNum ?? ""),
+          CompAuxLib: String(cleanRow.CompAuxLib ?? ""),
+          PieceRef: String(cleanRow.PieceRef ?? ""),
+          PieceDate: String(cleanRow.PieceDate ?? ""),
+          EcritureLib: String(cleanRow.EcritureLib ?? ""),
           Debit: debit,
           Credit: credit,
-          EcritureLet: cleanRow.EcritureLet || "",
-          DateLet: cleanRow.DateLet || "",
-          ValidDate: cleanRow.ValidDate || "",
+          EcritureLet: String(cleanRow.EcritureLet ?? ""),
+          DateLet: String(cleanRow.DateLet ?? ""),
+          ValidDate: String(cleanRow.ValidDate ?? ""),
           Montantdevise: cleanRow.Montantdevise
             ? parseFloat(String(cleanRow.Montantdevise).replace(",", ".")) || 0
             : 0,
-          Idevise: cleanRow.Idevise || "",
+          Idevise: String(cleanRow.Idevise ?? ""),
         };
       });
 
@@ -123,7 +123,7 @@ export default function FileUploader({
           if (results.errors.length > 0) {
             console.warn("Erreurs de parsing:", results.errors);
           }
-          validateAndProcess(results.data);
+          validateAndProcess(results.data as Record<string, string>[]);
         },
         error: (error) => {
           onError(`Erreur lors du parsing du CSV: ${error.message}`);
