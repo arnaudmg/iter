@@ -25,6 +25,48 @@ interface ToastItem {
   content: (close: () => void) => React.ReactNode;
 }
 
+interface AIInsight {
+  id: string;
+  title: string;
+  body: string;
+  tone?: "info" | "warning" | "success" | "neutral";
+  buttons?: Array<{ label: string; primary?: boolean }>;
+}
+
+type MappingValue = {
+  concept: string;
+  grandeCategorie: string;
+  sousCategorie: string;
+};
+
+const FEC_MAPPINGS_STORAGE_KEY = "fec-account-mappings";
+
+function loadMappingsFromStorage(): Map<string, MappingValue> {
+  if (typeof window === "undefined") return new Map();
+  try {
+    const raw = localStorage.getItem(FEC_MAPPINGS_STORAGE_KEY);
+    if (!raw) return new Map();
+    const obj = JSON.parse(raw) as Record<string, MappingValue>;
+    return new Map(Object.entries(obj));
+  } catch {
+    return new Map();
+  }
+}
+
+function saveMappingsToStorage(
+  map: Map<string, MappingValue>
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(
+      FEC_MAPPINGS_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(map))
+    );
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
 export default function FECPage() {
   const [fecData, setFecData] = useState<FECEntry[]>([]);
   const [operatingModel, setOperatingModel] = useState<OperatingModelRow[]>([]);
@@ -70,17 +112,31 @@ export default function FECPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSpreadsheetModalOpen, setIsSpreadsheetModalOpen] = useState(false);
   const [customMappings, setCustomMappings] = useState<
-    Map<
-      string,
-      {
-        concept: string;
-        grandeCategorie: string;
-        sousCategorie: string;
-      }
-    >
+    Map<string, MappingValue>
   >(new Map());
+
+  // Charger les mappings sauvegardés depuis le navigateur au montage
+  useEffect(() => {
+    setCustomMappings(loadMappingsFromStorage());
+  }, []);
+
+  // Ré-appliquer les mappings au FEC courant quand customMappings change (ex. chargement localStorage)
+  useEffect(() => {
+    if (fecData.length === 0) return;
+    const processed = processRawFEC(fecData, customMappings);
+    setOperatingModel(processed);
+    const unmapped = getUnmappedEntries(fecData);
+    const filtered = unmapped.filter((acc) => !customMappings.has(acc.compteNum));
+    setUnmappedAccounts(filtered);
+  }, [customMappings, fecData]);
+
   const [view, setView] = useState<View>("p&l");
   const [toastShown, setToastShown] = useState(false);
+
+  // AI-generated insights (Claude)
+  const [aiInsights, setAiInsights] = useState<AIInsight[] | null>(null);
+  const [insightsFetched, setInsightsFetched] = useState(false);
+  const insightsRequestedRef = useRef(false);
 
   // Toast Queue Management
   const [toastQueue, setToastQueue] = useState<ToastItem[]>([]);
@@ -144,6 +200,9 @@ export default function FECPage() {
     setToastShown(false);
     setToastQueue([]); // Reset queue
     setIsToastActive(false);
+    setAiInsights(null);
+    setInsightsFetched(false);
+    insightsRequestedRef.current = false;
     if (activeToastIdRef.current) {
       toast.dismiss(activeToastIdRef.current);
       activeToastIdRef.current = null;
@@ -158,17 +217,7 @@ export default function FECPage() {
       const balance = calculateGlobalBalance(data);
       setGlobalBalance(balance);
 
-      // Extraire les comptes non mappés (en excluant ceux déjà mappés manuellement)
-      const unmapped = getUnmappedEntries(data);
-      // Filtrer les comptes qui ont été mappés manuellement dans cette session
-      const filteredUnmapped = unmapped.filter(
-        (account) => !customMappings.has(account.compteNum)
-      );
-      setUnmappedAccounts(filteredUnmapped);
-
-      // Traiter les données même si certaines écritures sont déséquilibrées
-      const processed = processRawFEC(data, customMappings);
-      setOperatingModel(processed);
+      // operatingModel et unmappedAccounts sont mis à jour par l'effet qui dépend de fecData + customMappings
     } catch (err) {
       setError(
         err instanceof Error
@@ -354,34 +403,17 @@ export default function FECPage() {
       netAmount: number;
       count: number;
     },
-    mapping: {
-      concept: string;
-      grandeCategorie: string;
-      sousCategorie: string;
-    }
+    mapping: MappingValue
   ) => {
-    // Créer le nouveau Map avec le mapping ajouté
     const newMap = new Map(customMappings);
     newMap.set(account.compteNum, mapping);
 
-    // Sauvegarder le mapping personnalisé
     setCustomMappings(newMap);
+    saveMappingsToStorage(newMap);
 
-    // Retraiter les données avec le nouveau mapping
     if (fecData.length > 0) {
-      // Note: Pour l'instant, on garde juste le mapping en mémoire
-      // Dans une vraie app, on pourrait ajouter ce mapping au fichier mapping.ts
-      // ou le sauvegarder dans une base de données
-      console.log("Nouveau mapping ajouté:", {
-        account: account.compteNum,
-        mapping,
-      });
-
-      // Retraiter les données pour mettre à jour l'operating model
       const processed = processRawFEC(fecData, newMap);
       setOperatingModel(processed);
-
-      // Mettre à jour la liste des comptes non mappés
       const unmapped = getUnmappedEntries(fecData);
       const filteredUnmapped = unmapped.filter(
         (acc) => !newMap.has(acc.compteNum)
@@ -400,29 +432,23 @@ export default function FECPage() {
         netAmount: number;
         count: number;
       };
-      mapping: {
-        concept: string;
-        grandeCategorie: string;
-        sousCategorie: string;
-      };
+      mapping: MappingValue;
     }>
   ) => {
-    // Sauvegarder tous les mappings en une fois
     setCustomMappings((prev) => {
       const newMap = new Map(prev);
       mappings.forEach(({ account, mapping }) => {
         newMap.set(account.compteNum, mapping);
       });
 
-      // Retraiter les données avec les nouveaux mappings
+      saveMappingsToStorage(newMap);
+
       if (fecData.length > 0) {
         const processed = processRawFEC(fecData, newMap);
         setOperatingModel(processed);
-
-        // Mettre à jour la liste des comptes non mappés avec le nouveau Map
         const unmapped = getUnmappedEntries(fecData);
         const filteredUnmapped = unmapped.filter(
-          (account) => !newMap.has(account.compteNum)
+          (acc) => !newMap.has(acc.compteNum)
         );
         setUnmappedAccounts(filteredUnmapped);
       }
@@ -509,6 +535,7 @@ export default function FECPage() {
     setIsModalOpen(false);
     setIsSpreadsheetModalOpen(false);
     setCustomMappings(new Map());
+    saveMappingsToStorage(new Map());
     setColumnHeaders({
       category: "Category / Subcategory",
       amount: "Amount (€)",
@@ -523,11 +550,113 @@ export default function FECPage() {
     }
   };
 
-  // Populate Toast Queue once
+  // Request AI insights when FEC has been processed
   useEffect(() => {
-    if (toastShown || fecData.length === 0) return;
+    if (
+      fecData.length === 0 ||
+      toastShown ||
+      insightsRequestedRef.current ||
+      validationResult === null
+    ) {
+      return;
+    }
+    insightsRequestedRef.current = true;
 
-    const newQueue: ToastItem[] = [
+    const payload = {
+      validationResult,
+      globalBalance,
+      mappingHealth,
+      unmappedAccountsSummary: unmappedAccounts.map(
+        ({ compteNum, compteLib, netAmount, count }) => ({
+          compteNum,
+          compteLib,
+          netAmount,
+          count,
+        })
+      ),
+      operatingModelSummary: operatingModel
+        .filter((r) => r.type === "category")
+        .map((r) => ({
+          category: r.category,
+          amount: r.amount,
+          subCount: r.children?.length ?? 0,
+        })),
+      fecEntryCount: fecData.length,
+    };
+
+    fetch("/api/analyze-fec", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(res.statusText))))
+      .then((data: { insights: AIInsight[] }) => {
+        setAiInsights(data.insights ?? []);
+        setInsightsFetched(true);
+      })
+      .catch(() => {
+        setInsightsFetched(true);
+      });
+  }, [
+    fecData.length,
+    toastShown,
+    validationResult,
+    globalBalance,
+    mappingHealth,
+    unmappedAccounts,
+    operatingModel,
+  ]);
+
+  // Build toast queue from AI insights (or fallback to mocks) once insights are ready
+  useEffect(() => {
+    if (!insightsFetched || toastShown || fecData.length === 0) return;
+
+    const toneClasses: Record<string, string> = {
+      success: "border-green-200 bg-green-50 text-green-900",
+      warning: "border-amber-200 bg-amber-50 text-amber-900",
+      info: "border-blue-200 bg-blue-50 text-blue-900",
+      neutral: "border-gray-200 bg-gray-50 text-gray-900",
+    };
+
+    if (aiInsights && aiInsights.length > 0) {
+      const newQueue: ToastItem[] = aiInsights.map((insight) => ({
+        id: insight.id,
+        content: (close) => (
+          <div
+            className={`w-full rounded-lg border p-3 ${toneClasses[insight.tone ?? "neutral"] ?? toneClasses.neutral}`}
+          >
+            <p className="text-sm font-semibold">{insight.title}</p>
+            <p className="mt-1 text-sm opacity-90">{insight.body}</p>
+            <div className="mt-3 flex flex-wrap justify-end gap-2">
+              {insight.buttons?.map((btn) => (
+                <button
+                  key={btn.label}
+                  onClick={close}
+                  className={
+                    btn.primary
+                      ? "rounded-lg bg-[#562CFF] px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-[#4521cc]"
+                      : "rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-50"
+                  }
+                >
+                  {btn.label}
+                </button>
+              ))}
+              {(!insight.buttons || insight.buttons.length === 0) && (
+                <button
+                  onClick={close}
+                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-50"
+                >
+                  Fermer
+                </button>
+              )}
+            </div>
+          </div>
+        ),
+      }));
+      setToastQueue(newQueue);
+    } else {
+      // Fallback: static mocks when API unavailable or failed
+      const newQueue: ToastItem[] = [
       {
         id: "recurrent",
         content: (close) => (
@@ -770,12 +899,14 @@ export default function FECPage() {
         ),
       },
     ];
-
-    setToastQueue(newQueue);
+      setToastQueue(newQueue);
+    }
     setToastShown(true);
   }, [
-    fecData,
+    fecData.length,
     toastShown,
+    insightsFetched,
+    aiInsights,
     provisionReminders,
     yoyBadges,
     recurrentMock,
